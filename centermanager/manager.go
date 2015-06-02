@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"github.com/juanjosedemiguel/loadbalancingsim/message"
+	"math/rand"
 	"net"
 	"strings"
 	"time"
@@ -15,88 +17,93 @@ var (
 	serverusage    []string // stores cpu and ram precentages in the format: {"55,37", "26,94"}
 )
 
-// Inform server.supervisor to start executing a container.
-func addcontainer(serveraddress, containerconfig string) {
-	conn, err := net.Dial("tcp", serveraddress+":8080")
-	if err != nil {
-		fmt.Println("Connection error", err)
-	}
-	encoder := gob.NewEncoder(conn)
-	p := &message.Packet{2, containerconfig}
-	encoder.Encode(p)
-	conn.Close()
+// Allocates a new container to a server (SS) to increase it's load.
+func increaseload(serveraddress string, containerconfig string) int {
+	return message.Send(message.Packet{2, containerconfig}, serveraddress, 8080)
 }
 
-// Inform server.supervisor to stop executing a container.
-func removecontainer(serveraddress, containerid string) {
-	conn, err := net.Dial("tcp", serveraddress+":8080")
-	if err != nil {
-		fmt.Println("Connection error", err)
-	}
-	encoder := gob.NewEncoder(conn)
-	p := &message.Packet{2, containerid}
-	encoder.Encode(p)
-	conn.Close()
+// Deallocates (stops) a container from a server (SS) to decrease it's load.
+func decreaseload(serveraddress string, containerid string) int {
+	return message.Send(message.Packet{2, containerid}, serveraddress, 8080)
 }
 
-// Request resource usage information from a server.supervisor.
-// Waits until it receives an answer and then exits.
-func requestresources(serverindex int, serveraddress string) {
-	conn, err := net.Dial("tcp", serveraddress+":8080")
-	if err != nil {
-		fmt.Println("Connection error", err)
+// Requests resource usage information from a Server Supervisor (SS).
+func requestresources(serverid int, serveraddress string) {
+	exitcode := message.Send(message.Packet{3, ""}, serveraddress, 8080)
+	if exitcode == 0 {
+		ln, err := net.Listen("tcp", ":8080")
+		if err != nil {
+			fmt.Println("Connection error", err)
+		}
+		conn, err := ln.Accept() // this blocks (it's own thread) until connection or error
+		if err != nil {
+			fmt.Println("Connection error", err)
+		}
+		dec := gob.NewDecoder(conn)
+		p := &message.Packet{}
+		dec.Decode(p)
+		splitdata := strings.Split(",", p.Data)
+		serverusage[serverid] = splitdata[0] + "," + splitdata[1]
+		fmt.Println("Resources from server ", serverid, "(", serveraddress, "): CPU[", splitdata[0], "%], RAM[", splitdata[1], "%]")
+		conn.Close()
+		fmt.Printf("%v", serverusage)
+	} else {
+		fmt.Println("Server ", serveraddress, " is unavailable for requests.")
 	}
-	encoder := gob.NewEncoder(conn)
-	p := &message.Packet{3, ""}
-	encoder.Encode(p)
-	conn.Close()
-
-	ln, err := net.Listen("tcp", ":8080")
-	if err != nil {
-		fmt.Println("Connection error", err)
-	}
-	conn, err = ln.Accept() // this blocks until connection or error
-	if err != nil {
-		fmt.Println("Connection error", err)
-	}
-	dec := gob.NewDecoder(conn)
-	p = &message.Packet{}
-	dec.Decode(p)
-	splitdata := strings.Split(",", p.Data)
-	serverusage[serverindex] = splitdata[0] + "," + splitdata[1]
-	fmt.Println("Resources from server ", serverindex, "(", serveraddress, "): CPU[", splitdata[0], "%], RAM[", splitdata[1], "%]")
-	conn.Close()
-	fmt.Printf("%v", serverusage)
 }
 
-// Gather resource usage information from all servers.
+// Gathers resource usage information from all servers (SS).
 func checkcenterstatus() {
-	// for list of servers requestresources(server)
 	for i, element := range serverlist {
 		go requestresources(i, element)
 	}
 	time.Sleep(time.Duration(updateinterval) * time.Millisecond) // wait for next resource usage update
 }
 
-// Handle inputs and route them to corresponding functions of the Center Manager (CM).
+// Handles inputs from the Task Administrator (TA) and routes them to the corresponding functions of the Center Manager (CM).
 func handleConnection(conn net.Conn) {
 	dec := gob.NewDecoder(conn)
 	p := &message.Packet{}
 	dec.Decode(p)
 
+	// decoding JSON string
+	byt := []byte(p.Data)
+	var datajson map[string]interface{}
+	if err := json.Unmarshal(byt, &datajson); err != nil {
+		fmt.Println("Broken JSON/packet.")
+		panic(err)
+	}
+	var exitcode int
+	// container request from TA
 	switch p.Msgtype {
-	case 1:
-		// container request from task.administrator
-		fmt.Println("Received : ", p.Data)
-	case 3:
-		// CPU/RAM usage from server.supervisor
-		fmt.Println("Received : ", p.Data)
+	case 1: // add or remove container
+		var serveraddress string
+		requesttype := datajson["ip"]
+		if requesttype == "none" {
+			fmt.Println("Increase load (add container)")
+			rand.Seed(time.Now().UnixNano())                       // different seed for every iteration
+			serveraddress = serverlist[rand.Intn(len(serverlist))] // uniformfly distributed container allocations
+			containerconfig := fmt.Sprintf(`{"cores":%i,"ram":%i}`, datajson["cores"].(int), datajson["ram"].(int))
+			exitcode = increaseload(serveraddress, containerconfig)
+		} else {
+			fmt.Println("Decrease load (remove container)")
+			containerid := fmt.Sprintf(`{"containerid":%i}`, datajson["containerid"].(int))
+			exitcode = decreaseload(datajson["ip"].(string), containerid)
+		}
+
+		if exitcode == 0 {
+			fmt.Println("Received : ", p.Data)
+		} else {
+			fmt.Println("Server ", serveraddress, " is unavailable for requests.")
+		}
+	case 3: // Server usage information received.
+
 	}
 }
 
-// Sets up system - load servers and connections
+// Sets up system - loads servers (MISSING) and handling for incoming connections
 func main() {
-	fmt.Println("Start")
+	fmt.Println("Starting Center Manager (CM)")
 	ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		fmt.Println("Connection error", err)
