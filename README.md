@@ -1,0 +1,1 @@
+Distributed processing simulator of heterogeneous servers based on Linux Containers (LXC) for running automated load-balancing tests.

@@ -14,29 +14,43 @@ import (
 var updateinterval int // resource usage updates
 
 type Serversupervisor struct {
-	cores, ram, cpulevel, ramlevel int
-	containers                     []string
+	cores, ram, cpulevel, ramlevel         int
+	servertype, cputhreshold, ramthreshold int
+	containers                             []string
 }
 
 // Constructs a new SS.
-func NewServersupervisor() *Serversupervisor {
+func NewServersupervisor(cores, ram, cpulevel, ramlevel, servertype int) *Serversupervisor {
 	ss := Serversupervisor{
 		cores:      64,
 		ram:        256,
 		cpulevel:   10,
 		ramlevel:   10,
+		servertype: 1,
 		containers: []string{},
+	}
+	// compute intensive (1), memory intensive (2), combined (3)
+	switch servertype {
+	case 1:
+		ss.cputhreshold = 50
+		ss.ramthreshold = 10
+	case 2:
+		ss.cputhreshold = 10
+		ss.ramthreshold = 50
+	case 3:
+		ss.cputhreshold = 30
+		ss.ramthreshold = 30
 	}
 	return &ss
 }
 
 // Updates the server resource usage attributes (cpu, ram). (PENDING)
-func (ss *Serversupervisor) Setserverresources() {
+func (ss *Serversupervisor) setserverresources() {
 
 }
 
 // Updates the containerlist attribute. (PENDING)
-func (ss *Serversupervisor) Setserverstatus() {
+func (ss *Serversupervisor) setserverstatus() {
 
 }
 
@@ -52,7 +66,7 @@ func (ss *Serversupervisor) removecontainer(containerid int) int {
 
 // Reads container operational status.
 func (ss *Serversupervisor) readcontainerstatus(containerid int) {
-	cmd := exec.Command("docker -d -e lxc") // inestigar
+	cmd := exec.Command("lxc") // (PENDING)
 	err := cmd.Run()
 	if err != nil {
 		panic(err)
@@ -65,6 +79,46 @@ func (ss *Serversupervisor) checklxdstatus() {
 		go ss.readcontainerstatus(i)
 	}
 	time.Sleep(time.Duration(updateinterval) * time.Millisecond) // wait for next resource usage update
+}
+
+// Triggers migration threshold alert.
+func (ss *Serversupervisor) triggeralert() {
+	var alert int
+
+	for {
+		if cpulevel > cputhreshold {
+			if ramlevel > ramthreshold {
+				alert = 3 // both
+			} else {
+				alert = 1 // cpu only
+			}
+		} else if ramlevel > ramthreshold {
+			alert = 2 // ram only
+		}
+		alert = 0 // normal status
+
+		if alert > 0 {
+			ss.migratecontainer(alert) // blocks method until container is migrated ignoring alarms in the meantime
+		}
+
+		time.Sleep(1000 * time.Millisecond)
+	}
+}
+
+// Starts migration of container using WBP.
+func (ss *Serversupervisor) migratecontainer(alert int) {
+	// select best container for migration according to alert
+
+	// send call for proposals
+
+	// wait for proposals
+
+	// choose best candidate
+
+	// send proposal acceptance to best candidate
+
+	// wait for confirmation (in case the candidate is no longer able to host)
+
 }
 
 // Handles inputs and routes them to the corresponding functions of the Server Supervisor (SS).
@@ -108,7 +162,7 @@ func (ss *Serversupervisor) handleConnection(conn net.Conn) {
 }
 
 // Sets up handling for incoming connections.
-func (ss *Serversupervisor) Run(port int) {
+func (ss *Serversupervisor) run(port int) {
 	fmt.Println("Starting Server Supervisor (SS)")
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {

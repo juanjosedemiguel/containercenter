@@ -96,8 +96,8 @@ func handleConnection(conn net.Conn) {
 		} else {
 			fmt.Println("Server ", serveraddress, " is unavailable for requests.")
 		}
-	case 3: // Server usage information received.
-
+	case 3: // server usage information received. (PENDING)
+		//
 	}
 }
 
