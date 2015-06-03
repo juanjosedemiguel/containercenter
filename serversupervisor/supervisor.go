@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/juanjosedemiguel/loadbalancingsim/message"
 	"net"
+	"os/exec"
 	"strconv"
 	"time"
 )
@@ -29,22 +30,22 @@ func NewServersupervisor() *Serversupervisor {
 	return &ss
 }
 
-// Updates the server resource usage attributes (cpu, ram). (MISSING)
+// Updates the server resource usage attributes (cpu, ram). (PENDING)
 func (ss *Serversupervisor) Setserverresources() {
 
 }
 
-// Updates the containerlist attribute. (MISSING)
+// Updates the containerlist attribute. (PENDING)
 func (ss *Serversupervisor) Setserverstatus() {
 
 }
 
-// Adds a container in the lxc hypervisor with an assigned configuration (by the TA). (MISSING)
+// Adds a container in the lxc hypervisor with an assigned configuration (by the TA). (PENDING)
 func (ss Serversupervisor) addcontainer(containerconfig map[string]interface{}) int {
 	return 0
 }
 
-// Removes specified container in the lxc hypervisor. (MISSING)
+// Removes specified container in the lxc hypervisor. (PENDING)
 func (ss *Serversupervisor) removecontainer(containerid int) int {
 	return 0
 }
@@ -58,7 +59,7 @@ func (ss *Serversupervisor) readcontainerstatus(containerid int) {
 	}
 }
 
-// Checks server resource usage and updates (MISSING).
+// Checks server resource usage and updates (PENDING).
 func (ss *Serversupervisor) checklxdstatus() {
 	for i, _ := range ss.containers {
 		go ss.readcontainerstatus(i)
@@ -97,7 +98,7 @@ func (ss *Serversupervisor) handleConnection(conn net.Conn) {
 		sssnapshot := fmt.Sprint(string(jsonslice))
 		exitcode = message.Send(message.Packet{3, sssnapshot}, serveraddress, 8080) // responds to CM
 	case 4: // Workload Balancing Protocol packet (container proposal)
-		//
+
 	}
 	if exitcode == 0 {
 		fmt.Println("Connection error.")

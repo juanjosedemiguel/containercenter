@@ -101,7 +101,7 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-// Sets up system - loads servers (MISSING) and handling for incoming connections
+// Sets up system - loads servers (PENDING) and handling for incoming connections
 func main() {
 	fmt.Println("Starting Center Manager (CM)")
 	ln, err := net.Listen("tcp", ":8080")
