@@ -8,25 +8,25 @@ import (
 	"net"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
-var updateinterval int // resource usage updates
-
 type Serversupervisor struct {
-	cores, ram, cpulevel, ramlevel         int
-	servertype, cputhreshold, ramthreshold int
-	containers                             []string
+	servertype                     MsgType
+	cores, ram, cpulevel, ramlevel int
+	cputhreshold, ramthreshold     int
+	containers                     []Container
 }
 
 // Constructs a new SS.
-func NewServersupervisor(cores, ram, cpulevel, ramlevel, servertype int) *Serversupervisor {
+func NewServersupervisor(cores, ram, cpulevel, ramlevel int, servertype MsgType) *Serversupervisor {
 	ss := Serversupervisor{
-		cores:      64,
-		ram:        256,
-		cpulevel:   10,
-		ramlevel:   10,
-		servertype: 1,
+		cores:      cores,
+		ram:        ram,
+		cpulevel:   cpulevel,
+		ramlevel:   ramlevel,
+		servertype: message.Tipo0,
 		containers: []string{},
 	}
 	// compute intensive (1), memory intensive (2), combined (3)
@@ -78,7 +78,7 @@ func (ss *Serversupervisor) checklxdstatus() {
 	for i, _ := range ss.containers {
 		go ss.readcontainerstatus(i)
 	}
-	time.Sleep(time.Duration(updateinterval) * time.Millisecond) // wait for next resource usage update
+	time.Sleep(time.Duration(message.Updateinterval) * time.Millisecond) // wait for next resource usage update
 }
 
 // Triggers migration threshold alert.
@@ -86,13 +86,13 @@ func (ss *Serversupervisor) triggeralert() {
 	var alert int
 
 	for {
-		if cpulevel > cputhreshold {
-			if ramlevel > ramthreshold {
+		if ss.cpulevel > ss.cputhreshold {
+			if ss.ramlevel > ss.ramthreshold {
 				alert = 3 // both
 			} else {
 				alert = 1 // cpu only
 			}
-		} else if ramlevel > ramthreshold {
+		} else if ss.ramlevel > ss.ramthreshold {
 			alert = 2 // ram only
 		}
 		alert = 0 // normal status
@@ -107,9 +107,17 @@ func (ss *Serversupervisor) triggeralert() {
 
 // Starts migration of container using WBP.
 func (ss *Serversupervisor) migratecontainer(alert int) {
+	exitcode := 0
+
 	// select best container for migration according to alert
 
 	// send call for proposals
+	configslice := strings.Split(",", ss.containers[containerid])
+	cores := configslice[0]
+	ram := configslice[1]
+	containerconfig := fmt.Sprint(`{"cores":,`, cores, ` "ram":`, ram, `}`)
+	// for every server send a proposal
+	exitcode = message.Send(message.Packet{2, containerconfig}, serveraddress, 8080)
 
 	// wait for proposals
 
@@ -118,6 +126,10 @@ func (ss *Serversupervisor) migratecontainer(alert int) {
 	// send proposal acceptance to best candidate
 
 	// wait for confirmation (in case the candidate is no longer able to host)
+
+	// execute LXC command to migrate container
+
+	// send migration notification
 
 }
 
@@ -162,7 +174,7 @@ func (ss *Serversupervisor) handleConnection(conn net.Conn) {
 }
 
 // Sets up handling for incoming connections.
-func (ss *Serversupervisor) run(port int) {
+func (ss *Serversupervisor) Run(port int) {
 	fmt.Println("Starting Server Supervisor (SS)")
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
@@ -188,6 +200,6 @@ func main() {
 		panic(err)
 	}
 
-	ss := NewServersupervisor()
+	ss := NewServersupervisor(6, 16, 2, 2, 0)
 	ss.Run(8081)
 }
