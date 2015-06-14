@@ -16,10 +16,9 @@ type Packet struct {
 type MsgType uint8
 
 const (
-	Tipo0          MsgType = iota // = 0
-	Tipo1                         // = 1
-	Tipo2                         // = 2
-	Updateinterval = 1000         // resource usage updates
+	Tipo0 MsgType = iota // = 0 (compute intensive)
+	Tipo1                // = 1 (memory intensive)
+	Tipo2                // = 2 (combined)
 )
 
 // Sends a message that consists of a Packet struct to a specified server.
@@ -33,7 +32,7 @@ func Send(packet Packet, serveraddress string, port int) (exitcode int) {
 	encoder := gob.NewEncoder(conn)
 	p := &packet
 	encoder.Encode(p)
-	conn.Close()
+	defer conn.Close()
 	return
 }
 
@@ -49,10 +48,11 @@ func Listen(port int) (p Packet) {
 	}
 	dec := gob.NewDecoder(conn)
 	dec.Decode(&p)
+	defer conn.Close()
 	return
 }
 
-// Returns a JSON map for easy element access.
+// Returns payload from packet in a JSON map.
 func Decodepacket(p Packet) (data map[string]interface{}) {
 	byt := []byte(p.Data)
 
