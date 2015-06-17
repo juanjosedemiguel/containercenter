@@ -16,9 +16,18 @@ type Packet struct {
 type MsgType uint8
 
 const (
-	Tipo0 MsgType = iota // = 0 (compute intensive)
-	Tipo1                // = 1 (memory intensive)
-	Tipo2                // = 2 (combined)
+	ContainerRequest    MsgType = 1
+	ContainerAllocation MsgType = 2
+	ServerUsage         MsgType = 3
+	WBP                 MsgType = 4
+)
+
+type ServerType uint8
+
+const (
+	HighCPU    ServerType = iota // = 0 (compute intensive)
+	HighMemory                   // = 1 (memory intensive)
+	Combined                     // = 2 (combined)
 )
 
 // Sends a message that consists of a Packet struct to a specified server.

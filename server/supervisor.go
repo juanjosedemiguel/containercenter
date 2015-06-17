@@ -4,106 +4,64 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"github.com/juanjosedemiguel/loadbalancingsim/message"
 	"log"
 	"net"
-	"os/exec"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/juanjosedemiguel/loadbalancingsim/message"
 )
 
 type Container struct {
 	cores, memory      int
 	cpulevel, ramlevel int
-	lastusage          float64
+	timetolive         int
 }
 
 type Supervisor struct {
-	address                               string
-	servertype                            message.MsgType
-	id, cores, memory, cpulevel, ramlevel int
-	cputhreshold, ramthreshold            int
-	intervalstart                         time.Time
-	containers                            []Container
+	id, cores, memory, cpulevel, ramlevel, port int
+	servertype                                  message.ServerType
+	address                                     string
+	cputhreshold, ramthreshold                  int
+	intervalstart                               time.Time
+	containers                                  []*Container
 }
 
 // Constructs a new SS.
-func NewSupervisor(id, cores, memory, cpulevel, ramlevel int, servertype message.MsgType) *Supervisor {
+func NewSupervisor(id, cores, memory int, address string, port int, servertype message.ServerType) *Supervisor {
 	ss := Supervisor{
-		address:       address,
-		cores:         cores,
-		memory:        memory,
-		cpulevel:      cpulevel,
-		ramlevel:      ramlevel,
-		servertype:    message.Tipo0,
-		containers:    []Container{},
-		intervalstart: time.Now(),
+		id:         id,
+		cores:      cores,
+		memory:     memory,
+		servertype: servertype,
+		address:    address,
+		port:       port,
+		containers: []Container{},
 	}
 
 	switch servertype {
-	case 0:
+	case 0: // compute intensive
 		ss.cputhreshold = 50
 		ss.ramthreshold = 10
-	case 1:
+	case 1: // memory intensive
 		ss.cputhreshold = 10
 		ss.ramthreshold = 50
-	case 2:
+	case 2: // combined
 		ss.cputhreshold = 30
 		ss.ramthreshold = 30
 	}
 	return &ss
 }
 
-// Adds a container in the lxc hypervisor with an assigned configuration (by the TA). (PENDING)
-func (ss Supervisor) addcontainer(containerconfig map[string]interface{}) int {
-	return 0
-}
-
-// Removes specified container in the lxc hypervisor. (PENDING)
-func (ss *Supervisor) removecontainer(containerid int) int {
-	return 0
-}
-
-// Reads container operational status.
-func (ss *Supervisor) readcontainerstatus(containerid int) {
-	cmd := fmt.Sprint("lxc-info -n c", containerid)
-	out, err := exec.Command(cmd).Output() // (PENDING)
-	if err != nil {
-		log.Fatal(err) // (PENDING)
-	}
-	cmdoutput := string(out)
-	lines := strings.Split(cmdoutput, "\n")
-
-	var rawcpu, rawram float64
-	if rawcpu, err = strconv.ParseFloat(strings.Fields(lines[4])[2], 64); err != nil {
-		log.Fatal(err)
-	}
-	if rawram, err = strconv.ParseFloat(strings.Fields(lines[6])[2], 64); err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Println("CPU: ", rawcpu, " seconds")
-	fmt.Println("RAM: ", rawram, " MiB")
-
-	// convert raw values to percentages
-	cpu := ((rawcpu - ss.containers[containerid].lastusage) / (time.Now().Sub(ss.intervalstart).Seconds())) / 100
-	ram := (rawram / float64(ss.containers[containerid].memory)) / 100
-
-	// update container info
-	ss.containers[containerid].cpulevel = int(cpu)
-	ss.containers[containerid].ramlevel = int(ram)
-	ss.containers[containerid].lastusage = rawcpu
-}
-
-// Checks server resource usage and updates (PENDING).
-func (ss *Supervisor) checklxcstatus() {
-	for i, _ := range ss.containers {
-		go ss.readcontainerstatus(i) // goroutines?
-	}
-	ss.intervalstart = time.Now()
-
-	// send snapshot to CM
+// Adds a container with a configuration specified by the TA.
+func (ss Supervisor) addcontainer(containerconfig map[string]interface{}) {
+	ss.containers = append(ss.containers,
+		Container{
+			cores:      containerconfig["cores"],
+			memory:     containerconfig["memory"],
+			timetolive: containerconfig["timetolive"],
+		},
+	)
 }
 
 // Selects best container according to alert.
@@ -168,7 +126,7 @@ func (ss *Supervisor) migratecontainer(alert int) {
 	// containerid := ss.selectcontainer(alert)
 	// // send call for proposals
 	// container := ss.containers[containerid]
-	// containerconfig := fmt.Sprint(`{"cores":`, container.cores, `, "ram":`, container.ram, `}`)
+	// containerconfig := log.Sprint(`{"cores":`, container.cores, `, "ram":`, container.ram, `}`)
 	// // for every server send a proposal
 	// exitcode = message.Send(message.Packet{4, containerconfig}, serveraddress, 8080)
 
@@ -202,41 +160,64 @@ func (ss *Supervisor) migratecontainer(alert int) {
 	// }
 }
 
+// Updates the time to live of every container.
+func (ss *Supervisor) updatecontainers() {
+	for _, container := range ss.containers {
+		container.timetolive -= container.timetolive
+	}
+}
+
+// Updates each container's time to live.
+func (ss *Supervisor) checkexpiredcontainers() {
+	ss.updatecontainers()
+	alivecontainers := make([]Containers, len(ss.containers))
+
+	for i, container := range ss.containers {
+		if ss.containers[i].timetolive > 0 {
+			alivecontainers := append(alivecontainers, container)
+		}
+	}
+	ss.containers = alivecontainers
+}
+
+// Updates server resource usage and sends snapshot to CM.
+func (ss *Supervisor) updatesupervisorstatus() {
+	cpu, ram := 0
+	for i, _ := range ss.containers {
+		cpu += ss.containers[i][cpulevel]
+		ram += ss.containers[i][ramlevel]
+	}
+	ss.cpulevel = (cpu / len(containers)).(int)
+	ss.ramlevel = (ram / len(containers)).(int)
+}
+
 // Handles inputs and routes them to the corresponding functions of the Server Supervisor (SS).
 func (ss *Supervisor) handleConnection(conn net.Conn) {
 	dec := gob.NewDecoder(conn)
 	p := &message.Packet{}
 	dec.Decode(p)
-
 	// decoding JSON string
-	byt := []byte(p.Data)
-	var datajson map[string]interface{}
-	if err := json.Unmarshal(byt, &datajson); err != nil {
-		fmt.Println("Broken JSON/packet.")
-		panic(err)
-	}
+	datajson := message.Decodepacket(*p)
 
-	var exitcode int
-	var serveraddress = conn.RemoteAddr().String()
+	exitcode := 0
+	serveraddress := conn.RemoteAddr().String()
 	switch p.Msgtype {
-	case 2: // container addition/removal request from Center Manager (CM)
-		fmt.Println("Received : ", datajson)
+	case ContainerAllocation: // container allocated by Center Manager (CM)
+		ss.addcontainer(datajson)
 
-		if val, ok := datajson["containerid"]; ok { // decrease load
-			ss.removecontainer(val.(int))
-		} else { // increase load
-			ss.addcontainer(datajson)
-		}
-	case 3: // CPU/RAM usage request from Center Manager (CM)
+	case ServerUsage: // resource usage request from Center Manager (CM)
 		jsonmap, err := json.Marshal(ss)
 		if err != nil {
-			log.Printf("Broken JSON string.")
+			log.Printf("Converting supervisor to JSON failed.")
 		} else {
-			fmt.Println(string(jsonmap))
-			sssnapshot := fmt.Sprint(string(jsonmap))
+			ss.updatesupervisorstatus()
+			sssnapshot := string(jsonmap)
 			exitcode = message.Send(message.Packet{3, sssnapshot}, serveraddress, 8080) // responds to CM
+			if exitcode != 0 {
+				log.Println("Server ", ss.id, " snapshot delivery failed.")
+			}
 		}
-	case 4: // Workload Balancing Protocol (call for proposals, accept/reject proposal or successful/failed migration)
+	case WBP: // Workload Balancing Protocol (call for proposals, accept/reject proposal or successful/failed migration)
 		wbptype := datajson["type"]
 		if wbptype == "call" {
 		} else if wbptype == "proposal" {
@@ -245,24 +226,19 @@ func (ss *Supervisor) handleConnection(conn net.Conn) {
 		} else if wbptype == "termination" {
 		}
 	}
-	if exitcode == 0 {
-		fmt.Println("Connection error.")
-	} else {
-		fmt.Println("Server ", serveraddress, " is unavailable for requests.")
-	}
 }
 
 // Sets up handling for incoming connections.
-func (ss *Supervisor) Run(port int) {
-	fmt.Println("Starting Server Supervisor (SS)")
-	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+func (ss *Supervisor) Run() {
+	log.Println("Starting Server Supervisor (SS)")
+	ln, err := net.Listen("tcp", ":"+strconv.Itoa(ss.port))
 	if err != nil {
-		fmt.Println("Connection error", err)
+		log.Println("Connection error", err)
 	}
 	for {
 		conn, err := ln.Accept() // this blocks until connection or error
 		if err != nil {
-			fmt.Println("Connection error", err)
+			log.Println("Connection error", err)
 			continue
 		}
 		go ss.handleConnection(conn) // a goroutine handles conn so that the loop can accept other connections
@@ -271,8 +247,7 @@ func (ss *Supervisor) Run(port int) {
 
 // Executes the Server Supervisor (SS).
 func main() {
-
 	// this launches a new SS with the specified configuration and type.
-	ss := NewSupervisor(0, 6, 16, 2, 2, 0)
-	ss.Run(8081)
+	ss := NewSupervisor(0, 6, 16, "localhost", 8081, 0)
+	ss.Run()
 }
