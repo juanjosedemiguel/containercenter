@@ -20,6 +20,7 @@ const (
 	ContainerAllocation MsgType = 2
 	ServerUsage         MsgType = 3
 	WBP                 MsgType = 4
+	ServerList          MsgType = 5
 )
 
 type ServerType uint8
@@ -28,6 +29,18 @@ const (
 	HighCPU    ServerType = iota // = 0 (compute intensive)
 	HighMemory                   // = 1 (memory intensive)
 	Combined                     // = 2 (combined)
+)
+
+type WBPType uint8
+
+const (
+	CallForProposals WBPType = iota // = 0
+	Proposal                        // = 1
+	Accepted                        // = 2
+	Rejected                        // = 3
+	Container                       // = 4
+	Migration                       // = 5
+	MigrationDone                   // = 6
 )
 
 // Sends a message that consists of a Packet struct to a specified server.

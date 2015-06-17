@@ -57,7 +57,8 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 	// decoding JSON string
 	datajson := message.Decodepacket(*p)
 
-	var exitcode int
+	exicode := 0
+	remoteaddress := conn.RemoteAddr().String()
 	// container request from TA
 	switch p.Msgtype {
 	case ContainerRequest: // add or remove container
@@ -78,6 +79,13 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 	case ServerUsage: // server usage information received.
 		serverid := datajson["id"].(int)
 		manager.serversnapshots[serverid] = datajson
+	case ServerList:
+		servers := make([]string, len(manager.serversnapshots))
+		serverid := strconv.Itoa(datajson["id"])
+		for _, server := range manager.serversnapshots {
+			servers = append(servers, server["address"]+":"+strconv.Itoa(server["port"]))
+		}
+		message.Send(message.Packet{5, fmt.Sprint(servers)}, remoteaddress, 8081+serverid)
 	}
 }
 
