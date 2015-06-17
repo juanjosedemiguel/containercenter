@@ -32,14 +32,14 @@ func (a *Administrator) Run() {
 	exitcode := 0
 
 	// requests 30 containers with random configurations
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 3; i++ {
 		rand.Seed(time.Now().UnixNano()) // different seed for every iteration
 		cores := rand.Intn(8) + 1        // cores allowed for the container [1-8]
 		memory := rand.Intn(30) + 2      // memory allowed for the container [2-32 GB]
-		requestjson := fmt.Sprint(`{"cores":`, strconv.Itoa(cores), `,"memory":`, strconv.Itoa(memory), `}`)
+		requestjson := fmt.Sprintf(`{"id":%d,"cores":%d,"memory":%d,"cpulevel":%d,"ramlevel":%d,"timetolive":%d}`, i, cores, memory, 3, 3, 50)
 
 		// container request failed
-		if exitcode = message.Send(message.Packet{1, requestjson}, "localhost", 8080); exitcode > 0 {
+		if exitcode = message.Send(message.Packet{message.ContainerRequest, requestjson}, "localhost", 8080); exitcode > 0 {
 			log.Println("Container request (" + i + ") failed.")
 		}
 		time.Sleep(100 * time.Millisecond)

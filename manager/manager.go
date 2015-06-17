@@ -30,12 +30,12 @@ func NewManager() *Manager {
 
 // Allocates a new container to a server (SS) to increase it's workload.
 func (manager *Manager) increaseload(server map[string]interface{}, containerconfig string) int {
-	return message.Send(message.Packet{2, containerconfig}, server["address"].(string), server["port"].(int))
+	return message.Send(message.Packet{message.ContainerAllocation, containerconfig}, server["address"].(string), server["port"].(int))
 }
 
 // Requests resource usage information from a Server Supervisor (SS).
 func (manager *Manager) requestresources(server map[string]interface{}) {
-	exitcode := message.Send(message.Packet{3, ""}, server["address"].(string), server["port"].(int))
+	exitcode := message.Send(message.Packet{message.ServerUsage, ""}, server["address"].(string), server["port"].(int))
 	if exitcode != 0 {
 		log.Println("Server ", server["address"].(string), " is unavailable for requests.")
 	}
@@ -54,6 +54,8 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 	dec := gob.NewDecoder(conn)
 	p := &message.Packet{}
 	dec.Decode(p)
+	defer conn.Close()
+
 	// decoding JSON string
 	datajson := message.Decodepacket(*p)
 
@@ -61,7 +63,7 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 	remoteaddress := conn.RemoteAddr().String()
 	// container request from TA
 	switch p.Msgtype {
-	case ContainerRequest: // add or remove container
+	case message.ContainerRequest: // add or remove container
 		var serveraddress string
 		rand.Seed(time.Now().UnixNano()) // different seed for every iteration
 
@@ -76,21 +78,23 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 			log.Println("Server ", serveraddress, " is unavailable for requests.")
 		}
 
-	case ServerUsage: // server usage information received.
+	case message.ServerUsage: // server usage information received.
 		serverid := datajson["id"].(int)
 		manager.serversnapshots[serverid] = datajson
-	case ServerList:
+	case message.ServerList:
 		servers := make([]string, len(manager.serversnapshots))
 		serverid := strconv.Itoa(datajson["id"])
 		for _, server := range manager.serversnapshots {
 			servers = append(servers, server["address"]+":"+strconv.Itoa(server["port"]))
 		}
-		message.Send(message.Packet{5, fmt.Sprint(servers)}, remoteaddress, 8081+serverid)
+		message.Send(message.Packet{message.ServerList, fmt.Sprint(servers)}, remoteaddress, 8081+serverid)
 	}
 }
 
 // Sets up handling for incoming connections.
 func (manager *Manager) Run(port int) {
+	go manager.checkcenterstatus()
+
 	log.Println("Starting Center Manager (CM)")
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
@@ -104,8 +108,6 @@ func (manager *Manager) Run(port int) {
 		}
 		go manager.handleConnection(conn) // a goroutine handles conn so that the loop can accept other connections
 	}
-
-	go manager.checkcenterstatus()
 }
 
 // Sets up system - loads Server Supervisors (SS).

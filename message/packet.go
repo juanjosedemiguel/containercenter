@@ -38,9 +38,8 @@ const (
 	Proposal                        // = 1
 	Accepted                        // = 2
 	Rejected                        // = 3
-	Container                       // = 4
-	Migration                       // = 5
-	MigrationDone                   // = 6
+	Migration                       // = 4
+	MigrationDone                   // = 5
 )
 
 // Sends a message that consists of a Packet struct to a specified server.

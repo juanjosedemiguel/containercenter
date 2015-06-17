@@ -58,10 +58,11 @@ func NewSupervisor(id, cores, memory int, address string, port int, servertype m
 func (ss Supervisor) addcontainer(containerconfig map[string]interface{}) {
 	ss.containers = append(ss.containers,
 		Container{
+			id:         containerconfig["id"],
 			cores:      containerconfig["cores"],
 			memory:     containerconfig["memory"],
-			cpulevel:   4,
-			ramlevel:   4,
+			cpulevel:   containerconfig["cpulevel"],
+			ramlevel:   containerconfig["ramlevel"],
 			timetolive: containerconfig["timetolive"],
 		},
 	)
@@ -172,58 +173,63 @@ func (ss *Supervisor) migratecontainer(alert int) error {
 	}
 
 	// pick best candidate
-	bcid := 0
-	switch alert {
-	case 1: // pick the server with the lowest CPU usage
-		cpulevel := 100
-		for i, candidate := range candidates {
-			if candidate["cpulevel"] < cpulevel {
-				bcid = i
+	migrationdone := false
+	for migrationdone == false {
+		bcid := 0
+		switch alert {
+		case 1: // pick the server with the lowest CPU usage
+			cpulevel := 100
+			for i, candidate := range candidates {
+				if candidate["cpulevel"] < cpulevel {
+					bcid = i
+				}
+			}
+		case 2: // pick the server with the lowest RAM usage
+			ramlevel := 100
+			for i, candidate := range candidates {
+				if candidate["ramlevel"] < ramlevel {
+					bcid = i
+				}
+			}
+		case 3: // pick the server with the lowest combined usage
+			combinedlevel := 10000
+			for i, candidate := range candidates {
+				if (candidate["cpulevel"] * candidate["ramlevel"]) < combinedlevel {
+					bcid = i
+				}
 			}
 		}
-	case 2: // pick the server with the lowest RAM usage
-		ramlevel := 100
-		for i, candidate := range candidates {
-			if candidate["ramlevel"] < ramlevel {
-				bcid = i
-			}
+
+		// confirm best candidate can still host the container
+		candidateconn, err := net.Dial("tcp", candidates[bcid]["address"]+":"+candidates[bcid]["port"])
+		if err != nil {
+			fmt.Println("Connection error", err)
+			return err
 		}
-	case 3: // pick the server with the lowest combined usage
-		combinedlevel := 10000
-		for i, candidate := range candidates {
-			if (candidate["cpulevel"] * candidate["ramlevel"]) < combinedlevel {
-				bcid = i
-			}
-		}
-	}
+		defer candidateconn.Close()
 
-	// confirm best candidate can still host the container
-	candidateconn, err := net.Dial("tcp", candidates[bcid]["address"]+":"+candidates[bcid]["port"])
-	if err != nil {
-		fmt.Println("Connection error", err)
-		return err
-	}
-
-	encoder = gob.NewEncoder(candidateconn)
-	containerconfig := fmt.Sprint(`{"cores":`, strconv.Itoa(ss.containers[containerid].cores), `,"memory":`, strconv.Itoa(ss.containers[containerid].memory), `}`)
-	p = &message.Packet{message.Accepted, containerconfig}
-	encoder.Encode(p)
-
-	dec = gob.NewDecoder(candidateconn)
-	p = &message.Packet{}
-	dec.Decode(p)
-
-	// candidate is able to host
-	if p.Msgtype == message.Accepted {
-		// migrate container
-		p = &message.Packet{message.Migration, containerconfig}
+		encoder = gob.NewEncoder(candidateconn)
+		containerconfig := fmt.Sprint(`{"cores":`, strconv.Itoa(ss.containers[containerid].cores), `,"memory":`, strconv.Itoa(ss.containers[containerid].memory), `}`)
+		p = &message.Packet{message.Accepted, containerconfig}
 		encoder.Encode(p)
-		// inform migration completed
-		p = &message.Packet{message.MigrationDone, "Done!"}
-		encoder.Encode(p)
-		candidateconn.Close()
-	} else {
-		log.Println("Migration cancelled.")
+
+		dec = gob.NewDecoder(candidateconn)
+		p = &message.Packet{}
+		dec.Decode(p)
+
+		// candidate is able to host
+		if p.Msgtype == message.Accepted {
+			// migrate container
+			p = &message.Packet{message.Migration, containerconfig}
+			encoder.Encode(p)
+			// inform migration completed
+			p = &message.Packet{message.MigrationDone, "Done!"}
+			encoder.Encode(p)
+			ss.containers[containerid].timetolive == 0
+			migrationdone == true
+		} else {
+			log.Println("Migration cancelled.")
+		}
 	}
 }
 
@@ -300,6 +306,8 @@ func (ss *Supervisor) handleConnection(conn net.Conn) {
 	dec := gob.NewDecoder(conn)
 	p := &message.Packet{}
 	dec.Decode(p)
+	defer conn.Close()
+
 	// decoding JSON string
 	datajson := message.Decodepacket(*p)
 
@@ -313,9 +321,8 @@ func (ss *Supervisor) handleConnection(conn net.Conn) {
 		if err != nil {
 			log.Printf("Converting supervisor to JSON failed.")
 		} else {
-			ss.updatesupervisorstatus()
 			sssnapshot := string(jsonmap)
-			exitcode = message.Send(message.Packet{3, sssnapshot}, remoteaddress, 8080) // responds to CM
+			exitcode = message.Send(message.Packet{message.ServerUsage, sssnapshot}, remoteaddress, 8080) // responds to CM
 			if exitcode != 0 {
 				log.Println("Server ", ss.id, " snapshot delivery failed.")
 			}
@@ -325,16 +332,48 @@ func (ss *Supervisor) handleConnection(conn net.Conn) {
 		if wbptype == message.CallForProposals {
 			if ss.canhost(datajson) {
 				// send snapshot
+				jsonmap, err := json.Marshal(ss)
+				if err != nil {
+					log.Printf("Converting supervisor %d to JSON failed.", ss.id)
+				} else {
+					sssnapshot := string(jsonmap)
+					encoder = gob.NewEncoder(conn)
+					p = &message.Packet{message.Proposal, sssnapshot}
+					encoder.Encode(p)
+				}
 			} else {
 				// send refusal
+				encoder = gob.NewEncoder(conn)
+				p = &message.Packet{message.Rejected, ""}
+				encoder.Encode(p)
 			}
 		} else if wbptype == message.Accepted {
 			if ss.canhost(datajson) {
 				// send confirmation
+				encoder = gob.NewEncoder(conn)
+				p = &message.Packet{message.Acepted, ""}
+				encoder.Encode(p)
+
 				// wait for container and add it to ss
+				dec = gob.NewDecoder(conn)
+				p = &message.Packet{}
+				dec.Decode(p)
+				container := message.Decodepacket(p)
+				ss.addcontainer(container)
+
 				// wait for inform-done
+				dec = gob.NewDecoder(conn)
+				p = &message.Packet{}
+				dec.Decode(p)
+
+				if wbptype == message.MigrationDone {
+					log.Println("Container %d migrated from %s to %s:%i.", container["id"], remoteaddress, ss.address, ss.port)
+				}
 			} else {
 				//  send cancelation
+				encoder = gob.NewEncoder(conn)
+				p = &message.Packet{message.Rejected, ""}
+				encoder.Encode(p)
 			}
 		}
 	}
@@ -345,7 +384,6 @@ func (ss *Supervisor) Run() {
 	log.Println("Starting Server Supervisor (SS)")
 
 	// monitoring methods
-	go ss.updatecontainers()
 	go ss.updatesupervisorstatus()
 	go ss.checkexpiredcontainers()
 	go ss.triggeralert()
