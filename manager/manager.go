@@ -12,13 +12,13 @@ import (
 )
 
 type Manager struct {
-	servers []*server.Server
+	Servers []*server.Server
 }
 
 // Constructs a new manager.
 func NewManager() *Manager {
 	manager := Manager{
-		servers: []*server.Server{},
+		Servers: []*server.Server{},
 	}
 
 	return &manager
@@ -39,7 +39,7 @@ func (manager *Manager) requestresources(server *server.Server) {
 
 // Gathers resource usage information from all servers.
 func (manager *Manager) checkcenterstatus() {
-	for _, server := range manager.servers {
+	for _, server := range manager.Servers {
 		go manager.requestresources(server)
 	}
 	time.Sleep(time.Duration(1000) * time.Millisecond) // wait for next resource usage update
@@ -51,7 +51,7 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 	p := &message.Packet{}
 	dec.Decode(p)
 	defer conn.Close()
-
+	log.Println("Manager received:", p)
 	// container request from task
 	switch p.Msgtype {
 	case message.ContainerRequest: // add or remove container
@@ -59,7 +59,7 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 		rand.Seed(time.Now().UnixNano()) // different seed for every iteration
 
 		// uniformfly distributed container allocations
-		serv := manager.servers[rand.Intn(len(manager.servers))]
+		serv := manager.Servers[rand.Intn(len(manager.Servers))]
 		container := p.Data.(server.Container)
 
 		// send container allocation
@@ -69,11 +69,11 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 
 	case message.ServerUsage: // server usage information received.
 		server := p.Data.(server.Server)
-		manager.servers = append(manager.servers, &server)
+		manager.Servers = append(manager.Servers, &server)
 	case message.ServerList:
-		addresses := make([]string, len(manager.servers))
+		addresses := make([]string, len(manager.Servers))
 
-		for _, server := range manager.servers {
+		for _, server := range manager.Servers {
 			addresses = append(addresses, server.Address)
 		}
 		encoder := gob.NewEncoder(conn)
@@ -82,14 +82,15 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 }
 
 // Sets up handling for incoming connections.
-func (manager *Manager) Run(port int) {
-	go manager.checkcenterstatus()
-
-	log.Println("Starting Center Manager (CM)")
+func (manager *Manager) Run() {
+	log.Println("Starting Manager")
 	ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		log.Println("Connection error", err)
 	}
+
+	go manager.checkcenterstatus()
+
 	for {
 		conn, err := ln.Accept() // this blocks until connection or error
 		if err != nil {

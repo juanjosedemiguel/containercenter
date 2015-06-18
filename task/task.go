@@ -10,13 +10,15 @@ import (
 )
 
 type Task struct {
-	name string
+	name     string
+	requests int
 }
 
 // Constructs a new Task.
-func NewTask(name string) *Task {
+func NewTask(name string, requests int) *Task {
 	t := Task{
-		name: name,
+		name:     name,
+		requests: requests,
 	}
 	return &t
 }
@@ -28,8 +30,8 @@ func (t *Task) Run() {
 	log.Println("Starting Task")
 	exitcode := 0
 
-	// requests 30 containers with random configurations
-	for i := 0; i < 3; i++ {
+	// requests containers with random configurations
+	for i := 0; i < t.requests; i++ {
 		rand.Seed(time.Now().UnixNano()) // different seed for every iteration
 		cores := rand.Intn(8) + 1        // cores allowed for the container [1-8]
 		memory := rand.Intn(30) + 2      // memory allowed for the container [2-32 GB]

@@ -373,8 +373,8 @@ func (server *Server) Run() {
 	go server.updatesupervisorstatus()
 	go server.checkexpiredcontainers()
 	go server.triggeralert()
-
-	ln, err := net.Listen("tcp", server.Manageraddress)
+	log.Println("Serveraddress:", server.Address)
+	ln, err := net.Listen("tcp", server.Address)
 	if err != nil {
 		log.Println("Connection error", err)
 	}
