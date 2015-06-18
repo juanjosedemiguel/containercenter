@@ -2,25 +2,28 @@ package message
 
 import (
 	"encoding/gob"
-	"encoding/json"
 	"fmt"
 	"net"
-	"strconv"
 )
 
 type Packet struct {
 	Msgtype MsgType
-	Data    string
+	Data    interface{}
 }
 
 type MsgType uint8
 
 const (
-	ContainerRequest    MsgType = 1
-	ContainerAllocation MsgType = 2
-	ServerUsage         MsgType = 3
-	WBP                 MsgType = 4
-	ServerList          MsgType = 5
+	ContainerRequest MsgType = iota
+	ContainerAllocation
+	ServerUsage
+	ServerList
+	CallForProposals
+	Proposal
+	Accepted
+	Rejected
+	Migration
+	MigrationDone
 )
 
 type ServerType uint8
@@ -31,21 +34,10 @@ const (
 	Combined                     // = 2 (combined)
 )
 
-type WBPType uint8
-
-const (
-	CallForProposals WBPType = iota // = 0
-	Proposal                        // = 1
-	Accepted                        // = 2
-	Rejected                        // = 3
-	Migration                       // = 4
-	MigrationDone                   // = 5
-)
-
 // Sends a message that consists of a Packet struct to a specified server.
-func Send(packet Packet, serveraddress string, port int) (exitcode int) {
+func Send(packet Packet, serveraddress string) (exitcode int) {
 	exitcode = 0
-	conn, err := net.Dial("tcp", serveraddress+strconv.Itoa(port))
+	conn, err := net.Dial("tcp", serveraddress)
 	if err != nil {
 		fmt.Println("Connection error", err)
 		exitcode = 1
@@ -54,32 +46,5 @@ func Send(packet Packet, serveraddress string, port int) (exitcode int) {
 	p := &packet
 	encoder.Encode(p)
 	defer conn.Close()
-	return
-}
-
-// Listens for incoming packets on a specified port.
-func Listen(port int) (p Packet) {
-	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
-	if err != nil {
-		fmt.Println("Connection error", err)
-	}
-	conn, err := ln.Accept() // this blocks until connection or error
-	if err != nil {
-		fmt.Println("Connection error", err)
-	}
-	dec := gob.NewDecoder(conn)
-	dec.Decode(&p)
-	defer conn.Close()
-	return
-}
-
-// Returns payload from packet in a JSON map.
-func Decodepacket(p Packet) (data map[string]interface{}) {
-	byt := []byte(p.Data)
-
-	if err := json.Unmarshal(byt, &data); err != nil {
-		fmt.Println("Broken JSON/packet.")
-		panic(err)
-	}
 	return
 }
