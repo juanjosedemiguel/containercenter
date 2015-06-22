@@ -4,17 +4,21 @@ import (
 	"encoding/gob"
 	"fmt"
 	"net"
+
+	"github.com/juanjosedemiguel/loadbalancingsim/server"
 )
 
 type Packet struct {
-	Msgtype MsgType
-	Data    interface{}
+	Msgtype   MsgType
+	Container server.Container
+	Server    server.Server
 }
 
 type MsgType uint8
 
 const (
-	ContainerRequest MsgType = iota
+	NewServer MsgType = iota
+	ContainerRequest
 	ContainerAllocation
 	ServerUsage
 	ServerList

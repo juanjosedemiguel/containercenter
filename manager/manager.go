@@ -25,24 +25,38 @@ func NewManager() *Manager {
 }
 
 // Allocates a new container to increase the server's workload.
-func (manager *Manager) increaseload(server *server.Server, container server.Container) int {
-	return message.Send(message.Packet{message.ContainerAllocation, container}, server.Address)
+func (manager *Manager) increaseload(server *server.Server, container *server.Container) int {
+	return message.Send(message.Packet{message.ContainerAllocation, container, nil}, server.Address)
 }
 
 // Requests resource usage information from a server.
-func (manager *Manager) requestresources(server *server.Server) {
-	exitcode := message.Send(message.Packet{message.ServerUsage, nil}, server.Address)
-	if exitcode != 0 {
-		log.Println("Server ", server.Address, " is unavailable for requests.")
+func (manager *Manager) requestresources(serv *server.Server) error {
+	serverconn, err := net.Dial("tcp", serv.Address)
+	if err != nil {
+		log.Println("Connection error", err)
+		return err
 	}
+	encoder := gob.NewEncoder(serverconn)
+	packet := &message.Packet{message.ServerUsage, nil, nil}
+	encoder.Encode(packet)
+
+	dec := gob.NewDecoder(serverconn)
+	p := &message.Packet{}
+	dec.Decode(p)
+
+	serversnapshot := p.Server
+	manager.Servers = append(manager.Servers, &serversnapshot)
+	return nil
 }
 
 // Gathers resource usage information from all servers.
 func (manager *Manager) checkcenterstatus() {
-	for _, server := range manager.Servers {
-		go manager.requestresources(server)
+	for {
+		for _, server := range manager.Servers {
+			go manager.requestresources(server)
+		}
+		time.Sleep(time.Duration(1000) * time.Millisecond) // wait for next resource usage update
 	}
-	time.Sleep(time.Duration(1000) * time.Millisecond) // wait for next resource usage update
 }
 
 // Handles inputs from the task and routes them to the corresponding functions of the manager.
@@ -51,25 +65,29 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 	p := &message.Packet{}
 	dec.Decode(p)
 	defer conn.Close()
-	log.Println("Manager received:", p)
+	log.Println("Manager has received:", p)
 	// container request from task
 	switch p.Msgtype {
+	case message.NewServer: // new server in the network
+		serversnapshot := p.Server
+		manager.Servers = append(manager.Servers, &serversnapshot)
+		log.Println("Server added.")
 	case message.ContainerRequest: // add or remove container
-		var serveraddress string
-		rand.Seed(time.Now().UnixNano()) // different seed for every iteration
+		log.Println("len(manager.Servers):", len(manager.Servers))
+		if len(manager.Servers) > 0 {
+			var serveraddress string
+			rand.Seed(time.Now().UnixNano()) // different seed for every iteration
 
-		// uniformfly distributed container allocations
-		serv := manager.Servers[rand.Intn(len(manager.Servers))]
-		container := p.Data.(server.Container)
+			// uniformfly distributed container allocations
+			log.Println("len(manager.Servers):", len(manager.Servers))
+			serv := manager.Servers[rand.Intn(len(manager.Servers))]
+			container := p.Container
 
-		// send container allocation
-		if exitcode := manager.increaseload(serv, container); exitcode != 0 {
-			log.Println("Server ", serveraddress, " is unavailable for requests.")
+			// send container allocation
+			if exitcode := manager.increaseload(serv, container); exitcode != 0 {
+				log.Println("Server ", serveraddress, " is unavailable for requests.")
+			}
 		}
-
-	case message.ServerUsage: // server usage information received.
-		server := p.Data.(server.Server)
-		manager.Servers = append(manager.Servers, &server)
 	case message.ServerList:
 		addresses := make([]string, len(manager.Servers))
 

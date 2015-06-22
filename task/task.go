@@ -27,6 +27,7 @@ func NewTask(name string, requests int) *Task {
 // For this simulation, it requests containers from manager.go every 100 ms.
 // Each container executes for 50 s.
 func (t *Task) Run() {
+	time.Sleep(6 * time.Second)
 	log.Println("Starting Task")
 	exitcode := 0
 

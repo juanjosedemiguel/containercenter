@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/juanjosedemiguel/loadbalancingsim/manager"
 	"github.com/juanjosedemiguel/loadbalancingsim/message"
 	"github.com/juanjosedemiguel/loadbalancingsim/server"
@@ -24,9 +26,12 @@ func main() {
 	}
 	for _, server := range servers {
 		go server.Run()
+		time.Sleep(1000 * time.Millisecond) // they boot 1 second apart of each other
 	}
 
 	// starts the Task
 	task := task.NewTask("generic task", 6)
 	go task.Run()
+
+	time.Sleep(100000 * time.Millisecond)
 }

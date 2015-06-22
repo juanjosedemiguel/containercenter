@@ -49,6 +49,7 @@ func NewServer(id, cores, memory int, address, manageraddress string, servertype
 		server.Cputhreshold = 30
 		server.Ramthreshold = 30
 	}
+
 	return &server
 }
 
@@ -321,27 +322,26 @@ func (server *Server) handleConnection(conn net.Conn) {
 	remoteaddress := conn.RemoteAddr().String()
 	switch p.Msgtype {
 	case message.ContainerAllocation: // container allocated by manager
-		server.addcontainer(p.Data.(Container))
+		server.addcontainer(p.Container)
 	case message.ServerUsage: // resource usage request from manager
-
-		p = &message.Packet{message.ServerUsage, server}
+		p = &message.Packet{message.ServerUsage, nil, server}
 		encoder.Encode(p)
 	case message.CallForProposals:
-		if server.canhost(p.Data.(Container)) {
+		if server.canhost(p.Container) {
 			// send snapshot
-			p = &message.Packet{message.Proposal, server}
+			p = &message.Packet{message.Proposal, nil, server}
 			encoder.Encode(p)
 
 		} else {
 			// send refusal
-			p = &message.Packet{message.Rejected, nil}
+			p = &message.Packet{message.Rejected, nil, nil}
 			encoder.Encode(p)
 		}
 
 	case message.Accepted:
-		if server.canhost(p.Data.(Container)) {
+		if server.canhost(p.Container) {
 			// send confirmation
-			p = &message.Packet{message.Accepted, nil}
+			p = &message.Packet{message.Accepted, nil, nil}
 			encoder.Encode(p)
 
 			// wait for container and add it to server
@@ -354,11 +354,11 @@ func (server *Server) handleConnection(conn net.Conn) {
 			dec.Decode(p)
 
 			if p.Msgtype == message.MigrationDone {
-				log.Printf("Container %d migrated from %s to %s.", p.Data.(Container).Id, remoteaddress, server.Address)
+				log.Printf("Container %d migrated from %s to %s.", p.Container.Id, remoteaddress, server.Address)
 			}
 		} else {
 			//  send cancelation
-			p = &message.Packet{message.Rejected, nil}
+			p = &message.Packet{message.Rejected, nil, nil}
 			encoder.Encode(p)
 		}
 
@@ -367,13 +367,18 @@ func (server *Server) handleConnection(conn net.Conn) {
 
 // Sets up handling for incoming connections and run monitoring goroutines.
 func (server *Server) Run() {
-	log.Printf("Starting Server %d", server.Id)
+	log.Printf("Starting Server %d...", server.Id)
+	log.Println(*server)
+
+	// registers server in the managers list
+	message.Send(message.Packet{message.NewServer, nil, *server}, server.Manageraddress)
 
 	// monitoring methods
 	go server.updatesupervisorstatus()
 	go server.checkexpiredcontainers()
 	go server.triggeralert()
-	log.Println("Serveraddress:", server.Address)
+
+	log.Printf("Server %d started.", server.Id)
 	ln, err := net.Listen("tcp", server.Address)
 	if err != nil {
 		log.Println("Connection error", err)
