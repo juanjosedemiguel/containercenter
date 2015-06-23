@@ -16,12 +16,12 @@ func main() {
 	go manager.Run()
 
 	// 16 cores, 128 GB of RAM (one of each server type)
-	types := []server.ServerType{server.HighCPU, server.HighMemory, server.Combined}
+	types := []server.ServerType{server.HighCPU, server.HighMemory, server.Combined, server.HighCPU, server.HighMemory, server.Combined, server.HighCPU, server.HighMemory, server.Combined}
 	servers := make([]*server.Server, len(types))
 	for i, servertype := range types {
 		port := 8081 + i
 		serveraddress := fmt.Sprintf("localhost:%d", port)
-		servers[i] = server.NewServer(i, 16, 64, serveraddress, "localhost:8080", servertype)
+		servers[i] = server.NewServer(i, 64, 256, serveraddress, "localhost:8080", servertype)
 	}
 	for _, server := range servers {
 		go server.Run()
@@ -29,8 +29,8 @@ func main() {
 	}
 
 	// starts the Task
-	task := task.NewTask("generic task", 6)
+	task := task.NewTask("generic task", 90)
 	go task.Run()
 
-	time.Sleep(60000 * time.Millisecond)
+	time.Sleep(100000 * time.Millisecond)
 }

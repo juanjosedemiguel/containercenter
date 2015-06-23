@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	Verbatim bool
+	Verbose bool = false
 )
 
 type Manager struct {
@@ -55,14 +55,14 @@ func (manager *Manager) requestresources(serv *server.Server) *server.Server {
 func (manager *Manager) checkcenterstatus() {
 	for {
 		manager.Lock()
-		log.Println("Servers:")
+		//log.Println("Servers:")
 		for i, server := range manager.Servers {
 			server = manager.requestresources(server)
-			log.Printf("Server %d containers:%+v\n", i, server.Containers)
+			//log.Printf("Server %d containers:%+v\n", i, server.Containers)
 		}
-		log.Println("Done.")
+		//log.Println("Done.")
 		manager.Unlock()
-		time.Sleep(time.Duration(3000) * time.Millisecond) // wait for next resource usage update
+		time.Sleep(time.Duration(1000) * time.Millisecond) // wait for next resource usage update
 	}
 }
 
@@ -73,25 +73,25 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 	dec.Decode(p)
 	defer conn.Close()
 
-	if Verbatim {
+	if Verbose {
 		log.Println("Manager has received:", p.Msgtype, p.Container, p.Server)
 	}
 
 	// container request from task
 	switch p.Msgtype {
 	case server.Newserver: // new server in the network
-		if Verbatim {
+		if Verbose {
 			log.Println("Manager has received Newserver.")
 		}
 		manager.Lock()
 		serv := p.Server
 		manager.Servers = append(manager.Servers, serv)
-		if Verbatim {
+		if Verbose {
 			log.Printf("Server %s added.", p.Server.Address)
 		}
 		manager.Unlock()
 	case server.ContainerRequest: // add or remove container
-		if Verbatim {
+		if Verbose {
 			log.Println("Manager has received Containerrequest.")
 		}
 		manager.Lock()
@@ -101,19 +101,20 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 
 			// uniformfly distributed container allocations
 			serv := manager.Servers[rand.Intn(len(manager.Servers))]
+			//serv := manager.Servers[0]
 			container := p.Container
 
 			// send container allocation
 			if exitcode := manager.increaseload(serv, container); exitcode != 0 {
 				log.Printf("Server %s is unavailable for requests.", serveraddress)
 			}
-			if Verbatim {
+			if Verbose {
 				log.Printf("Container %d requested.", p.Container.Id)
 			}
 		}
 		manager.Unlock()
 	case server.ServerList:
-		if Verbatim {
+		if Verbose {
 			log.Println("Manager has received Serverlist.")
 		}
 		manager.Lock()
@@ -131,7 +132,7 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 
 // Sets up handling for incoming connections.
 func (manager *Manager) Run() {
-	if Verbatim {
+	if Verbose {
 		log.Println("Starting Manager")
 	}
 	ln, err := net.Listen("tcp", ":8080")

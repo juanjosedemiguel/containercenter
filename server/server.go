@@ -6,14 +6,25 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
 )
 
 var (
-	Verbatim bool
+	Verbose bool = false
+	output  *os.File
 )
+
+func init() {
+	output, err := os.Create("log")
+	if err != nil {
+		fmt.Print(err)
+	}
+	log.SetOutput(output)
+
+}
 
 type Packet struct {
 	Msgtype   MsgType
@@ -70,7 +81,7 @@ func Send(packet Packet, serveraddress string) (exitcode int) {
 	exitcode = 0
 	conn, err := net.Dial("tcp", serveraddress)
 	if err != nil {
-		fmt.Println("Connection error", err)
+		log.Println("Connection error", err)
 		exitcode = 1
 	}
 	encoder := gob.NewEncoder(conn)
@@ -119,6 +130,7 @@ func (server *Server) getcontainer(containerid int) (container *Container) {
 	server.mutex.Lock()
 	for _, container := range server.Containers {
 		if containerid == container.Id {
+			server.mutex.Unlock()
 			return container
 		}
 	}
@@ -163,6 +175,8 @@ func (server *Server) triggeralert() {
 	var alert int
 
 	for {
+		//log.Printf("%d (server.Cpulevel > server.Cputhreshold): %d > %d", server.Id, server.Cpulevel, server.Cputhreshold)
+		//log.Printf("%d (server.Ramlevel > server.Ramthreshold): %d > %d", server.Id, server.Ramlevel, server.Ramthreshold)
 		if server.Cpulevel > server.Cputhreshold {
 			if server.Ramlevel > server.Ramthreshold {
 				alert = 3 // both
@@ -178,10 +192,10 @@ func (server *Server) triggeralert() {
 		if alert > 0 {
 			err := server.migratecontainer(alert) // blocks method until container is migrated ignoring alarms in the meantime
 			if err != nil {
-				fmt.Println(err)
+				log.Println(err)
 			} else {
 				alert = 0
-				if Verbatim {
+				if Verbose {
 					log.Println("Migration succesful.")
 				}
 			}
@@ -194,7 +208,7 @@ func (server *Server) triggeralert() {
 // Starts migration of container using the WBP protocol.
 func (server *Server) migratecontainer(alert int) (err error) {
 	log.Printf("Alert %d triggered in server %d.", alert, server.Id)
-	if Verbatim {
+	if Verbose {
 		log.Println("Migration started.")
 	}
 	// select best container for migration according to alert
@@ -202,12 +216,12 @@ func (server *Server) migratecontainer(alert int) (err error) {
 	container := server.getcontainer(containerid)
 
 	// get servers in network
-	if Verbatim {
+	if Verbose {
 		log.Println("Getting available servers.")
 	}
 	conn, err := net.Dial("tcp", server.Manageraddress)
 	if err != nil {
-		fmt.Println("Connection error", err)
+		log.Println("Connection error", err)
 		return err
 	}
 	encoder := gob.NewEncoder(conn)
@@ -225,7 +239,7 @@ func (server *Server) migratecontainer(alert int) (err error) {
 	conn.Close()
 
 	// call for proposals
-	if Verbatim {
+	if Verbose {
 		log.Println("Getting candidates.")
 	}
 	candidates := make([]*Server, 0)
@@ -256,7 +270,7 @@ func (server *Server) migratecontainer(alert int) (err error) {
 
 		if packet.Msgtype == Proposal {
 			candidates = append(candidates, packet.Server) // snapshot of candidate server
-			if Verbatim {
+			if Verbose {
 				log.Println("Candidate added.")
 			}
 		}
@@ -301,7 +315,7 @@ func (server *Server) migratecontainer(alert int) (err error) {
 
 		candidateconn, err := net.Dial("tcp", Address)
 		if err != nil {
-			fmt.Println("Connection error", err, i)
+			log.Println("Connection error", err, i)
 			return err
 		}
 		defer candidateconn.Close()
@@ -335,7 +349,7 @@ func (server *Server) migratecontainer(alert int) (err error) {
 				return err
 			}
 			container.Timetolive = 0
-			server.updatecontainers()
+			//server.updatecontainers()
 
 			migrationdone = true
 		} else {
@@ -343,7 +357,7 @@ func (server *Server) migratecontainer(alert int) (err error) {
 		}
 	}
 	if !migrationdone {
-		err = fmt.Errorf("Migration failed because there are no available candidates.")
+		log.Println("Migration failed because there are no available candidates.")
 	}
 	return
 }
@@ -352,7 +366,7 @@ func (server *Server) migratecontainer(alert int) (err error) {
 func (server *Server) updatecontainers() {
 	server.mutex.Lock()
 
-	for i, container := range server.Containers {
+	for _, container := range server.Containers {
 		rand.Seed(time.Now().UnixNano()) // different seed for every iteration
 		container.Cpulevel += rand.Intn(7) - 2
 		rand.Seed(time.Now().UnixNano()) // independent variables
@@ -361,15 +375,13 @@ func (server *Server) updatecontainers() {
 		if container.Cpulevel < 0 {
 			container.Cpulevel = 0
 		} else if container.Cpulevel > 100 {
-			log.Printf("Container %d from server %d exceeded CPU limit (100%).", i)
-			container.Timetolive = 0
+			container.Cpulevel = 100
 		}
 
 		if container.Ramlevel < 0 {
 			container.Ramlevel = 0
 		} else if container.Ramlevel > 100 {
-			log.Printf("Container %d from server %d exceeded RAM limit (100%).", i)
-			container.Timetolive = 0
+			container.Ramlevel = 100
 		}
 
 		container.Timetolive--
@@ -383,13 +395,17 @@ func (server *Server) checkexpiredcontainers() {
 		server.updatecontainers()
 		server.mutex.Lock()
 		alivecontainers := []*Container{}
+		//log.Println(server.Containers, server.Id)
 		for _, container := range server.Containers {
+			//log.Println("For", container.Id, container.Timetolive)
 			if container.Timetolive > 0 {
+				//log.Println("If", container.Id, container.Timetolive)
 				alivecontainers = append(alivecontainers, container)
 			}
 		}
-		log.Printf("Server %d - Alive containers: %+v", server.Id, alivecontainers)
+		//log.Printf("Server %d - Alive containers: %+v", server.Id, alivecontainers)
 		server.Containers = alivecontainers
+		//log.Println("Cont", server.Containers)
 		server.mutex.Unlock()
 		time.Sleep(1000 * time.Millisecond) // check every second
 	}
@@ -417,16 +433,16 @@ func (server *Server) readserverresources() {
 		server.mutex.Lock()
 		cpu, ram := 0, 0
 		for _, container := range server.Containers {
-			cpu += container.Cpulevel
-			ram += container.Ramlevel
+			cpu += (container.Cpulevel + 1) * container.Cores
+			ram += (container.Ramlevel + 1) * container.Memory
 		}
 		n := len(server.Containers)
 		if n == 0 {
 			server.Cpulevel = 0
 			server.Ramlevel = 0
 		} else {
-			server.Cpulevel = int((float64(cpu) / float64(n)))
-			server.Ramlevel = int((float64(ram) / float64(n)))
+			server.Cpulevel = int(float64(cpu) / float64(100*server.Cores) * 100)
+			server.Ramlevel = int(float64(ram) / float64(100*server.Memory) * 100)
 		}
 		server.mutex.Unlock()
 
@@ -442,7 +458,7 @@ func (server *Server) handleConnection(conn net.Conn) {
 	encoder := gob.NewEncoder(conn)
 	defer conn.Close()
 
-	if Verbatim {
+	if Verbose {
 		log.Printf("Server %d has received:", server.Id, p.Msgtype, p.Container, p.Server)
 	}
 	var err error
@@ -450,21 +466,22 @@ func (server *Server) handleConnection(conn net.Conn) {
 	remoteaddress := conn.RemoteAddr().String()
 	switch p.Msgtype {
 	case ContainerAllocation: // container allocated by manager
-		if Verbatim {
+		if Verbose {
 			log.Printf("Server %d has received Containerallocation.", server.Id)
 		}
-		if Verbatim {
+		if Verbose {
 			log.Println("Container allocated:", p.Container.Id, p.Container.Cores, p.Container.Memory, p.Container.Cpulevel, p.Container.Ramlevel, p.Container.Timetolive)
 		}
 		server.addcontainer(p.Container)
 	case ServerUsage: // resource usage request from manager
-		if Verbatim {
+		if Verbose {
 			log.Printf("Server %d has received Serverusage.", server.Id)
 		}
+		//log.Println(server)
 		p = &Packet{ServerUsage, nil, server}
 		encoder.Encode(p)
 	case CallForProposals:
-		if Verbatim {
+		if Verbose {
 			log.Printf("Server %d has received Callforproposals.", server.Id)
 		}
 		if server.canhost(p.Container) {
@@ -484,7 +501,7 @@ func (server *Server) handleConnection(conn net.Conn) {
 		}
 
 	case Accepted:
-		if Verbatim {
+		if Verbose {
 			log.Printf("Server %d has received Accepted.", server.Id)
 		}
 		if server.canhost(p.Container) {
@@ -526,10 +543,10 @@ func (server *Server) handleConnection(conn net.Conn) {
 
 // Sets up handling for incoming connections and run monitoring goroutines.
 func (server *Server) Run() {
-	if Verbatim {
+	if Verbose {
 		log.Printf("Starting Server %d...", server.Id)
 	}
-	if Verbatim {
+	if Verbose {
 		log.Println(server)
 	}
 
@@ -541,7 +558,7 @@ func (server *Server) Run() {
 	go server.checkexpiredcontainers()
 	go server.triggeralert()
 
-	if Verbatim {
+	if Verbose {
 		log.Printf("Server %d started.", server.Id)
 	}
 	ln, err := net.Listen("tcp", server.Address)

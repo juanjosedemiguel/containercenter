@@ -47,7 +47,7 @@ func (t *Task) Run() {
 		if exitcode = server.Send(server.Packet{server.ContainerRequest, container, nil}, "localhost:8080"); exitcode > 0 {
 			log.Printf("Container request (%d) failed.", i)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	log.Println("Task is done requesting.")
