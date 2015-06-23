@@ -55,12 +55,12 @@ func (manager *Manager) requestresources(serv *server.Server) *server.Server {
 func (manager *Manager) checkcenterstatus() {
 	for {
 		manager.Lock()
-		//log.Println("Servers:")
+		log.Println("Servers:")
 		for i, server := range manager.Servers {
 			server = manager.requestresources(server)
-			//log.Printf("Server %d containers:%+v\n", i, server.Containers)
+			log.Printf("Server %d containers:%+v\n", i, server.Containers)
 		}
-		//log.Println("Done.")
+		log.Println("Done.")
 		manager.Unlock()
 		time.Sleep(time.Duration(1000) * time.Millisecond) // wait for next resource usage update
 	}

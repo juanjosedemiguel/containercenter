@@ -353,7 +353,7 @@ func (server *Server) migratecontainer(alert int) (err error) {
 
 			migrationdone = true
 		} else {
-			log.Println("Migration canceled.")
+			log.Println("Migration canceled by candidate. Retrying with next candidate.")
 		}
 	}
 	if !migrationdone {
