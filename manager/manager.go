@@ -11,6 +11,10 @@ import (
 	"github.com/juanjosedemiguel/loadbalancingsim/server"
 )
 
+var (
+	Verbatim bool
+)
+
 type Manager struct {
 	Servers []*server.Server
 	sync.Mutex
@@ -31,11 +35,10 @@ func (manager *Manager) increaseload(serv *server.Server, container *server.Cont
 }
 
 // Requests resource usage information from a server.
-func (manager *Manager) requestresources(serv *server.Server) error {
+func (manager *Manager) requestresources(serv *server.Server) *server.Server {
 	serverconn, err := net.Dial("tcp", serv.Address)
 	if err != nil {
 		log.Println("Connection error", err)
-		return err
 	}
 	encoder := gob.NewEncoder(serverconn)
 	packet := &server.Packet{server.ServerUsage, nil, nil}
@@ -44,21 +47,22 @@ func (manager *Manager) requestresources(serv *server.Server) error {
 	dec := gob.NewDecoder(serverconn)
 	p := &server.Packet{}
 	dec.Decode(p)
-
 	serversnapshot := p.Server
-	serv = serversnapshot
-	return nil
+	return serversnapshot
 }
 
 // Gathers resource usage information from all servers.
 func (manager *Manager) checkcenterstatus() {
 	for {
 		manager.Lock()
-		for _, server := range manager.Servers {
-			go manager.requestresources(server)
+		log.Println("Servers:")
+		for i, server := range manager.Servers {
+			server = manager.requestresources(server)
+			log.Printf("Server %d containers:%+v\n", i, server.Containers)
 		}
+		log.Println("Done.")
 		manager.Unlock()
-		time.Sleep(time.Duration(1000) * time.Millisecond) // wait for next resource usage update
+		time.Sleep(time.Duration(3000) * time.Millisecond) // wait for next resource usage update
 	}
 }
 
@@ -68,21 +72,28 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 	p := &server.Packet{}
 	dec.Decode(p)
 	defer conn.Close()
-	log.Println("Manager has received:", p)
+
+	if Verbatim {
+		log.Println("Manager has received:", p.Msgtype, p.Container, p.Server)
+	}
 
 	// container request from task
 	switch p.Msgtype {
 	case server.Newserver: // new server in the network
+		if Verbatim {
+			log.Println("Manager has received Newserver.")
+		}
 		manager.Lock()
 		serv := p.Server
-		//log.Println("Server: ")
-		//log.Println(serv)
 		manager.Servers = append(manager.Servers, serv)
-		log.Printf("Server %s added.", p.Server.Address)
-		//log.Println("len(manager.Servers):", len(manager.Servers))
-		//log.Println("manager.Servers:", manager.Servers)
+		if Verbatim {
+			log.Printf("Server %s added.", p.Server.Address)
+		}
 		manager.Unlock()
 	case server.ContainerRequest: // add or remove container
+		if Verbatim {
+			log.Println("Manager has received Containerrequest.")
+		}
 		manager.Lock()
 		if len(manager.Servers) > 0 {
 			var serveraddress string
@@ -94,19 +105,24 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 
 			// send container allocation
 			if exitcode := manager.increaseload(serv, container); exitcode != 0 {
-				log.Println("Server ", serveraddress, " is unavailable for requests.")
+				log.Printf("Server %s is unavailable for requests.", serveraddress)
 			}
-			log.Printf("Container %d requested.", p.Container.Id)
+			if Verbatim {
+				log.Printf("Container %d requested.", p.Container.Id)
+			}
 		}
 		manager.Unlock()
 	case server.ServerList:
+		if Verbatim {
+			log.Println("Manager has received Serverlist.")
+		}
 		manager.Lock()
 		addresses := []string{}
 
 		for _, server := range manager.Servers {
 			addresses = append(addresses, server.Address)
 		}
-		log.Println("addresses (m):", addresses)
+
 		encoder := gob.NewEncoder(conn)
 		encoder.Encode(addresses)
 		manager.Unlock()
@@ -115,7 +131,9 @@ func (manager *Manager) handleConnection(conn net.Conn) {
 
 // Sets up handling for incoming connections.
 func (manager *Manager) Run() {
-	log.Println("Starting Manager")
+	if Verbatim {
+		log.Println("Starting Manager")
+	}
 	ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		log.Println("Connection error", err)
