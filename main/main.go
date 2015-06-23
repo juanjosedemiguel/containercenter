@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/juanjosedemiguel/loadbalancingsim/manager"
-	"github.com/juanjosedemiguel/loadbalancingsim/message"
 	"github.com/juanjosedemiguel/loadbalancingsim/server"
 	"github.com/juanjosedemiguel/loadbalancingsim/task"
 )
@@ -17,7 +16,7 @@ func main() {
 	go manager.Run()
 
 	// 16 cores, 128 GB of RAM (one of each server type)
-	types := []message.ServerType{message.HighCPU, message.HighMemory, message.Combined}
+	types := []server.ServerType{server.HighCPU, server.HighMemory, server.Combined}
 	servers := make([]*server.Server, len(types))
 	for i, servertype := range types {
 		port := 8081 + i
@@ -33,5 +32,5 @@ func main() {
 	task := task.NewTask("generic task", 6)
 	go task.Run()
 
-	time.Sleep(100000 * time.Millisecond)
+	time.Sleep(60000 * time.Millisecond)
 }
